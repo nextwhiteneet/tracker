@@ -123,7 +123,7 @@ export function SettingsClient({ config }: { config: ConfigJson }) {
             {replanning ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
             Smart re-plan from today
           </button>
-          <a className="btn btn-ghost" href="/api/export" download="ascent-backup.json">
+          <a className="btn btn-ghost" href="/api/export" download="next-white-backup.json">
             <Download size={15} /> Export everything (JSON)
           </a>
           <button className="btn btn-ghost !border-[var(--bad)]/40 !text-[var(--bad)] hover:!border-[var(--bad)]" onClick={hardReset} disabled={resetting}>

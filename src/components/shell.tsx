@@ -11,6 +11,7 @@ import {
   Timer,
   Settings,
   Flame,
+  LogOut,
 } from "lucide-react";
 import { ThemeToggle } from "./theme";
 import { LogoMark } from "@/app/page";
@@ -27,16 +28,25 @@ const NAV = [
 
 export function Shell({
   children,
+  username,
   name,
   streak,
   examDaysLeft,
 }: {
   children: React.ReactNode;
+  username: string;
   name: string;
   streak: number;
   examDaysLeft: number;
 }) {
   const pathname = usePathname();
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/login";
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -45,7 +55,7 @@ export function Shell({
         <Link href="/" className="flex items-center gap-2.5 px-2 mb-8">
           <LogoMark />
           <div>
-            <div className="font-display text-[17px] leading-none">Ascent</div>
+            <div className="font-display text-[17px] leading-none">NEXT WHITE</div>
             <div className="text-[10px] uppercase tracking-[0.18em] text-ink-3 mt-1">NEET tracker</div>
           </div>
         </Link>
@@ -76,6 +86,12 @@ export function Shell({
           <p className="text-[11.5px] text-ink-2 leading-relaxed">
             {examDaysLeft} days to NEET, {name.split(" ")[0] || "doc"}. Stay green.
           </p>
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-line pt-3">
+            <span className="mono text-[11.5px] text-ink-2 truncate">@{username}</span>
+            <button type="button" onClick={logout} className="inline-flex items-center gap-1 text-[11.5px] font-medium text-ink-2 hover:text-ink transition-colors">
+              <LogOut size={13} /> Log out
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -84,7 +100,7 @@ export function Shell({
         <div className="flex items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
             <LogoMark small />
-            <span className="font-display text-base">Ascent</span>
+            <span className="font-display text-base">NEXT WHITE</span>
           </Link>
           <div className="flex items-center gap-2.5">
             <span className="chip !py-1">
@@ -92,6 +108,9 @@ export function Shell({
               <span className="mono">{streak}</span>
             </span>
             <ThemeToggle />
+            <button type="button" onClick={logout} aria-label="Log out" className="btn btn-ghost btn-sm !px-2.5">
+              <LogOut size={14} />
+            </button>
           </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

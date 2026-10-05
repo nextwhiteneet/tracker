@@ -1,11 +1,13 @@
 import { getTrackerData } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
 import { TrackerClient, type TrackerSubject } from "@/components/tracker-client";
 import { SectionHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function TrackerPage() {
-  const { stats, itemsByChapter, today } = await getTrackerData();
+  const user = await requireUser();
+  const { stats, itemsByChapter, today } = await getTrackerData(user.id);
 
   const subjects: TrackerSubject[] = stats.bySubject.map((s) => ({
     id: s.subject.id,

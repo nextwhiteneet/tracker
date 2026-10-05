@@ -26,12 +26,12 @@ export const QUOTES: Array<{ text: string; by: string }> = [
   { text: "Genius is one percent inspiration and ninety-nine percent perspiration.", by: "Thomas Edison" },
   { text: "Your only limit is the one you set for yourself.", by: "Unknown" },
   { text: "Small daily improvements are the key to staggering long-term results.", by: "Unknown" },
-  { text: "The stethoscope is earned, not given. Earn it daily.", by: "Ascent" },
-  { text: "One chapter a day keeps the backlog away.", by: "Ascent" },
-  { text: "Wearing a white coat starts with wearing out your desk chair.", by: "Ascent" },
-  { text: "Lakhs will appear. The seat goes to the most consistent.", by: "Ascent" },
-  { text: "Revise today what you learned yesterday. That is how ranks are made.", by: "Ascent" },
-  { text: "Toppers don't study more days. They waste fewer.", by: "Ascent" },
+  { text: "The stethoscope is earned, not given. Earn it daily.", by: "NEXT WHITE" },
+  { text: "One chapter a day keeps the backlog away.", by: "NEXT WHITE" },
+  { text: "Wearing a white coat starts with wearing out your desk chair.", by: "NEXT WHITE" },
+  { text: "Lakhs will appear. The seat goes to the most consistent.", by: "NEXT WHITE" },
+  { text: "Revise today what you learned yesterday. That is how ranks are made.", by: "NEXT WHITE" },
+  { text: "Toppers don't study more days. They waste fewer.", by: "NEXT WHITE" },
 ];
 
 export function quoteOfTheDay(dateStr?: string): { text: string; by: string } {

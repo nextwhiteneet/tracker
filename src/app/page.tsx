@@ -48,7 +48,7 @@ export default function Landing() {
           <div className="glass rounded-2xl px-4 py-3 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2.5">
               <LogoMark />
-              <span className="font-display text-lg tracking-tight">Ascent</span>
+              <span className="font-display text-lg tracking-tight">NEXT WHITE</span>
               <span className="chip hidden sm:inline-flex">NEET UG</span>
             </Link>
             <nav className="hidden md:flex items-center gap-7 text-[13.5px] font-medium text-ink-2">
@@ -326,10 +326,10 @@ export default function Landing() {
             </h2>
             <div className="relative mt-9">
               <Link href="/dashboard" className="btn btn-accent !px-8 !py-3.5 !text-[15px]">
-                Begin your ascent <ArrowRight size={16} />
+                Begin your journey <ArrowRight size={16} />
               </Link>
             </div>
-            <p className="relative mt-5 text-[12.5px] text-bg/60 dark:text-ink-2">Set up in 4 minutes · your data stays with you</p>
+            <p className="relative mt-5 text-[12.5px] text-bg/60 dark:text-ink-2">Free to use · set up in 4 minutes · your data stays private to your account</p>
           </div>
         </Reveal>
       </section>
@@ -337,9 +337,9 @@ export default function Landing() {
       <footer className="border-t border-line py-8">
         <div className="mx-auto max-w-6xl px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-[12.5px] text-ink-2">
           <div className="flex items-center gap-2">
-            <LogoMark small /> <span className="font-display text-sm">Ascent</span> — a personal NEET preparation tracker
+            <LogoMark small /> <span className="font-display text-sm">NEXT WHITE</span> — a personal NEET preparation tracker
           </div>
-          <div className="mono">consistency &gt; intensity</div>
+          <div className="mono">trust the process</div>
         </div>
       </footer>
     </main>
@@ -350,13 +350,11 @@ export function LogoMark({ small = false }: { small?: boolean }) {
   const s = small ? 22 : 30;
   return (
     <span
-      className="grid place-items-center rounded-xl bg-ink text-bg dark:bg-accent dark:text-white flex-none"
-      style={{ width: s, height: s }}
+      className="grid place-items-center rounded-xl bg-ink dark:bg-accent flex-none leading-none"
+      style={{ width: s, height: s, fontSize: s * 0.62 }}
+      aria-hidden="true"
     >
-      <svg width={s * 0.58} height={s * 0.58} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 20 L10 12 L14 15 L20 5" />
-        <path d="M15 5 h5 v5" />
-      </svg>
+      🥼
     </span>
   );
 }

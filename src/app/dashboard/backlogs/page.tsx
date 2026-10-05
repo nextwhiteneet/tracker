@@ -1,11 +1,13 @@
 import { getBacklogs } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
 import { BacklogClient, type BacklogItem } from "@/components/backlog-client";
 import { SectionHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function BacklogsPage() {
-  const items = await getBacklogs();
+  const user = await requireUser();
+  const items = await getBacklogs(user.id);
   const payload: BacklogItem[] = items.map((i) => ({
     id: i.id,
     date: i.date,

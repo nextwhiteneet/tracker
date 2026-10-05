@@ -44,10 +44,10 @@ export function FocusClient({
   useEffect(() => {
     const m = Math.floor(remaining / 60);
     const s = remaining % 60;
-    if (state !== "idle") document.title = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} · Focus — Ascent`;
-    else document.title = "Ascent — NEET Preparation Tracker";
+    if (state !== "idle") document.title = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} · Focus — NEXT WHITE`;
+    else document.title = "NEXT WHITE — NEET Preparation Tracker";
     return () => {
-      document.title = "Ascent — NEET Preparation Tracker";
+      document.title = "NEXT WHITE — NEET Preparation Tracker";
     };
   }, [remaining, state]);
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { getProfile, getStats, getTodayBundle } from "@/lib/data";
 import { quoteOfTheDay } from "@/lib/quotes";
 import { greeting, todayStr, fmtDay, fmtDate, fmtMinutes } from "@/lib/utils";
@@ -11,8 +12,13 @@ import { AlertTriangle, CalendarDays, Check, Flame, Hourglass, Target } from "lu
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
+  const user = await requireUser();
   const today = todayStr();
-  const [profile, stats, bundle] = await Promise.all([getProfile(), getStats(), getTodayBundle(today)]);
+  const [profile, stats, bundle] = await Promise.all([
+    getProfile(user.id),
+    getStats(user.id),
+    getTodayBundle(user.id, today),
+  ]);
   const quote = quoteOfTheDay(today);
 
   const items: TodayItem[] = bundle.items.map((i) => ({

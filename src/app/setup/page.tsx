@@ -1,10 +1,12 @@
 import { getConfig } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
 import SetupWizard, { type ConfigJson } from "@/components/setup-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
-  const config = await getConfig();
+  const user = await requireUser();
+  const config = await getConfig(user.id);
   const payload: ConfigJson = {
     isEmpty: config.isEmpty,
     profile: {

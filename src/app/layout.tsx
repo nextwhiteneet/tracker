@@ -21,7 +21,10 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ascent — NEET Preparation Tracker",
+  title: "NEXT WHITE — NEET Preparation Tracker",
+  icons: {
+    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A5%BC%3C/text%3E%3C/svg%3E",
+  },
   description:
     "Your personal NEET command centre: lecture planner, syllabus tracker, backlogs, revision, streaks and pace analytics — built for the white coat dream.",
 };

@@ -1,4 +1,5 @@
 import { getStats, getProfile } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
 import { SectionHead, PaceChart, Donut, ProgressBar, SubjectGlyph } from "@/components/ui";
 import { Heatmap } from "@/components/heatmap";
 import { CountUp } from "@/components/reveal";
@@ -8,7 +9,8 @@ import { Clock3, BookOpenCheck, Percent, Flag, TrendingUp, TrendingDown } from "
 export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage() {
-  const [stats, profile] = await Promise.all([getStats(), getProfile()]);
+  const user = await requireUser();
+  const [stats, profile] = await Promise.all([getStats(user.id), getProfile(user.id)]);
   const today = todayStr();
 
   const studiedTotal = stats.doneMinutes + stats.focusMinutesTotal;

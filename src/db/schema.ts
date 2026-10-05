@@ -10,9 +10,10 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-/** Singleton row (id = 1) holding the user's profile + planner engine settings. */
+/** One row per user holding the profile + planner engine settings. */
 export const profiles = pgTable("profiles", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique(),
   name: text("name").notNull().default(""),
   motto: text("motto").notNull().default(""),
   examName: text("exam_name").notNull().default("NEET"),
@@ -28,26 +29,37 @@ export const profiles = pgTable("profiles", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const subjects = pgTable("subjects", {
+export const subjects = pgTable(
+  "subjects",
+  {
   id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
   key: text("key").notNull(),
   name: text("name").notNull(),
   color: text("color").notNull().default("#E85C22"),
   icon: text("icon").notNull().default("atom"),
   lectureLength: integer("lecture_length").notNull().default(75),
   orderIndex: integer("order_index").notNull().default(0),
-});
+  },
+  (t) => [index("subjects_user_idx").on(t.userId)]
+);
 
-export const teachers = pgTable("teachers", {
-  id: serial("id").primaryKey(),
-  subjectId: integer("subject_id").notNull(),
-  name: text("name").notNull(),
-});
+export const teachers = pgTable(
+  "teachers",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    subjectId: integer("subject_id").notNull(),
+    name: text("name").notNull(),
+  },
+  (t) => [index("teachers_user_idx").on(t.userId)]
+);
 
 export const chapters = pgTable(
   "chapters",
   {
     id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
     subjectId: integer("subject_id").notNull(),
     name: text("name").notNull(),
     classLevel: integer("class_level").notNull().default(11),
@@ -55,24 +67,29 @@ export const chapters = pgTable(
     orderIndex: integer("order_index").notNull().default(0),
     active: boolean("active").notNull().default(true),
   },
-  (t) => [index("chapters_subject_idx").on(t.subjectId)]
+  (t) => [index("chapters_subject_idx").on(t.subjectId), index("chapters_user_idx").on(t.userId)]
 );
 
 export const routine = pgTable(
   "routine",
   {
     id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
     dayOfWeek: integer("day_of_week").notNull(), // 0 Sun .. 6 Sat
     subjectId: integer("subject_id").notNull(),
     lectures: integer("lectures").notNull().default(2),
   },
-  (t) => [uniqueIndex("routine_day_subject_idx").on(t.dayOfWeek, t.subjectId)]
+  (t) => [
+    uniqueIndex("routine_day_subject_idx").on(t.dayOfWeek, t.subjectId),
+    index("routine_user_idx").on(t.userId),
+  ]
 );
 
 export const planItems = pgTable(
   "plan_items",
   {
     id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
     date: text("date").notNull(), // YYYY-MM-DD (local)
     subjectId: integer("subject_id").notNull(),
     chapterId: integer("chapter_id"),
@@ -85,6 +102,7 @@ export const planItems = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
   },
   (t) => [
+    index("plan_user_date_idx").on(t.userId, t.date),
     index("plan_date_idx").on(t.date),
     index("plan_chapter_idx").on(t.chapterId),
     index("plan_status_date_idx").on(t.status, t.date),
@@ -95,30 +113,73 @@ export const revisions = pgTable(
   "revisions",
   {
     id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
     chapterId: integer("chapter_id").notNull(),
     rounds: integer("rounds").notNull().default(0),
     confidence: integer("confidence").notNull().default(0), // 0..5
     lastRevisedOn: text("last_revised_on"),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (t) => [uniqueIndex("revisions_chapter_idx").on(t.chapterId)]
+  (t) => [
+    uniqueIndex("revisions_chapter_idx").on(t.chapterId),
+    index("revisions_user_idx").on(t.userId),
+  ]
 );
 
 export const focusSessions = pgTable(
   "focus_sessions",
   {
     id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
     date: text("date").notNull(),
     minutes: integer("minutes").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
   },
-  (t) => [index("focus_date_idx").on(t.date)]
+  (t) => [index("focus_user_date_idx").on(t.userId, t.date)]
 );
 
-export const dayNotes = pgTable("day_notes", {
-  id: serial("id").primaryKey(),
-  date: text("date").notNull().unique(),
-  text: text("text").notNull().default(""),
+export const dayNotes = pgTable(
+  "day_notes",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    date: text("date").notNull(),
+    text: text("text").notNull().default(""),
+  },
+  (t) => [uniqueIndex("day_notes_user_date_idx").on(t.userId, t.date)]
+);
+
+/* ------------------------------------------------------------------ */
+/* Accounts                                                            */
+/* ------------------------------------------------------------------ */
+
+export const users = pgTable(
+  "users",
+  {
+    id: serial("id").primaryKey(),
+    username: text("username").notNull(), // stored lowercase
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("users_username_idx").on(t.username)]
+);
+
+/** id = sha256(session token). The raw token only ever lives in the user's cookie. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId)]
+);
+
+/** Tiny login/signup throttle (works on serverless because it lives in the DB). */
+export const authAttempts = pgTable("auth_attempts", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  windowStart: timestamp("window_start").notNull().defaultNow(),
 });
 
 export type Profile = typeof profiles.$inferSelect;

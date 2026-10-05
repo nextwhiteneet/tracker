@@ -1,13 +1,15 @@
 import { getRevisionData, getStats } from "@/lib/data";
+import { requireUser } from "@/lib/auth";
 import { SectionHead } from "@/components/ui";
 import { RevisionClient, type RevChapter } from "@/components/revision-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function RevisionPage() {
+  const user = await requireUser();
   const [{ completed, inProgress, revMap, doneMap }, stats] = await Promise.all([
-    getRevisionData(),
-    getStats(),
+    getRevisionData(user.id),
+    getStats(user.id),
   ]);
 
   const subjectOf = (subjectId: number) =>

@@ -23,16 +23,16 @@ import { DEFAULT_SYLLABUS, defaultExamDate } from "./syllabus";
 /* Profiles                                                            */
 /* ------------------------------------------------------------------ */
 
-export async function getProfile(): Promise<Profile> {
-  const rows = await db.select().from(profiles).orderBy(asc(profiles.id)).limit(1);
+export async function getProfile(userId: number): Promise<Profile> {
+  const rows = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
   if (rows.length) return rows[0];
   const today = todayStr();
-  // Race-safe singleton bootstrap (explicit id=1, conflict-tolerant)
+  // Race-safe bootstrap: one profile row per user (unique on user_id)
   await db
     .insert(profiles)
-    .values({ id: 1, name: "", examDate: defaultExamDate(), startDate: today })
+    .values({ userId, name: "", examDate: defaultExamDate(), startDate: today })
     .onConflictDoNothing();
-  const again = await db.select().from(profiles).orderBy(asc(profiles.id)).limit(1);
+  const again = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
   return again[0];
 }
 
@@ -74,16 +74,16 @@ export interface PlannerConfig {
   isEmpty: boolean;
 }
 
-export async function getConfig(): Promise<PlannerConfig> {
+export async function getConfig(userId: number): Promise<PlannerConfig> {
   const [profile, subs, tchs, chps, rout, items] = await Promise.all([
-    getProfile(),
-    db.select().from(subjects).orderBy(asc(subjects.orderIndex)),
-    db.select().from(teachers),
-    db.select().from(chapters).orderBy(asc(chapters.orderIndex)),
-    db.select().from(routine),
+    getProfile(userId),
+    db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
+    db.select().from(teachers).where(eq(teachers.userId, userId)),
+    db.select().from(chapters).where(eq(chapters.userId, userId)).orderBy(asc(chapters.orderIndex)),
+    db.select().from(routine).where(eq(routine.userId, userId)),
     db.select({ chapterId: planItems.chapterId })
       .from(planItems)
-      .where(and(eq(planItems.status, "done"), eq(planItems.kind, "lecture"))),
+      .where(and(eq(planItems.userId, userId), eq(planItems.status, "done"), eq(planItems.kind, "lecture"))),
   ]);
 
   const doneMap = new Map<number, number>();
@@ -154,12 +154,12 @@ export interface SaveConfigInput {
   setupCompleted: boolean;
 }
 
-export async function saveConfig(input: SaveConfigInput): Promise<void> {
+export async function saveConfig(userId: number, input: SaveConfigInput): Promise<void> {
   // 1. Profile
   await db
     .insert(profiles)
     .values({
-      id: 1,
+      userId,
       name: input.profile.name,
       motto: input.profile.motto,
       examDate: input.profile.examDate,
@@ -173,7 +173,7 @@ export async function saveConfig(input: SaveConfigInput): Promise<void> {
       setupCompleted: input.setupCompleted,
     })
     .onConflictDoUpdate({
-      target: profiles.id,
+      target: profiles.userId,
       set: {
         name: input.profile.name,
         motto: input.profile.motto,
@@ -190,7 +190,7 @@ export async function saveConfig(input: SaveConfigInput): Promise<void> {
     });
 
   // 2. Subjects (identity by key)
-  const existingSubs = await db.select().from(subjects);
+  const existingSubs = await db.select().from(subjects).where(eq(subjects.userId, userId));
   const incomingKeys = new Set(input.subjects.map((s) => s.key));
   const removedSubs = existingSubs.filter((s) => !incomingKeys.has(s.key));
   if (removedSubs.length) {
@@ -223,6 +223,7 @@ export async function saveConfig(input: SaveConfigInput): Promise<void> {
       const ins = await db
         .insert(subjects)
         .values({
+          userId,
           key: s.key,
           name: s.name,
           color: s.color,
@@ -239,7 +240,7 @@ export async function saveConfig(input: SaveConfigInput): Promise<void> {
     await db.delete(teachers).where(eq(teachers.subjectId, subjectId));
     if (s.teachers.length) {
       await db.insert(teachers).values(
-        s.teachers.filter(Boolean).map((name) => ({ subjectId, name }))
+        s.teachers.filter(Boolean).map((name) => ({ userId, subjectId, name }))
       );
     }
 
@@ -279,47 +280,48 @@ export async function saveConfig(input: SaveConfigInput): Promise<void> {
       } else {
         await db
           .insert(chapters)
-          .values({ subjectId, name: c.name, classLevel: c.cls, totalLectures: c.lectures, orderIndex: j, active: c.active });
+          .values({ userId, subjectId, name: c.name, classLevel: c.cls, totalLectures: c.lectures, orderIndex: j, active: c.active });
       }
     }
   }
 
   // 3. Routine: replace all
-  await db.delete(routine);
+  await db.delete(routine).where(eq(routine.userId, userId));
   const routineRows = input.routine
     .map((r) => ({
+      userId,
       dayOfWeek: r.dayOfWeek,
       subjectId: keyToId.get(r.subjectKey),
       lectures: Math.min(12, Math.max(1, r.lectures)),
     }))
-    .filter((r) => r.subjectId != null) as Array<{ dayOfWeek: number; subjectId: number; lectures: number }>;
+    .filter((r) => r.subjectId != null) as Array<{ userId: number; dayOfWeek: number; subjectId: number; lectures: number }>;
   if (routineRows.length) await db.insert(routine).values(routineRows);
 
   // 4. Rebuild pending plan items
-  await regeneratePlan();
+  await regeneratePlan(userId);
 }
 
 /* ------------------------------------------------------------------ */
 /* Plan regeneration                                                   */
 /* ------------------------------------------------------------------ */
 
-export async function regeneratePlan(): Promise<{ inserted: number }> {
-  const profile = await getProfile();
+export async function regeneratePlan(userId: number): Promise<{ inserted: number }> {
+  const profile = await getProfile(userId);
   const [subs, chps, rout, doneRows, revisedRows, chapterNames] = await Promise.all([
-    db.select().from(subjects).orderBy(asc(subjects.orderIndex)),
-    db.select().from(chapters).where(eq(chapters.active, true)).orderBy(asc(chapters.orderIndex)),
-    db.select().from(routine),
+    db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
+    db.select().from(chapters).where(and(eq(chapters.userId, userId), eq(chapters.active, true))).orderBy(asc(chapters.orderIndex)),
+    db.select().from(routine).where(eq(routine.userId, userId)),
     db
       .select({ chapterId: planItems.chapterId, n: sql<number>`count(*)::int` })
       .from(planItems)
-      .where(and(eq(planItems.status, "done"), eq(planItems.kind, "lecture")))
+      .where(and(eq(planItems.userId, userId), eq(planItems.status, "done"), eq(planItems.kind, "lecture")))
       .groupBy(planItems.chapterId),
     db
       .select({ chapterId: planItems.chapterId })
       .from(planItems)
-      .where(and(eq(planItems.status, "done"), eq(planItems.kind, "revision")))
+      .where(and(eq(planItems.userId, userId), eq(planItems.status, "done"), eq(planItems.kind, "revision")))
       .groupBy(planItems.chapterId),
-    db.select({ id: chapters.id, name: chapters.name }).from(chapters),
+    db.select({ id: chapters.id, name: chapters.name }).from(chapters).where(eq(chapters.userId, userId)),
   ]);
 
   const doneByChapter: Record<number, number> = {};
@@ -347,10 +349,11 @@ export async function regeneratePlan(): Promise<{ inserted: number }> {
     revisedChapterIds,
   });
 
-  await db.delete(planItems).where(eq(planItems.status, "pending"));
+  await db.delete(planItems).where(and(eq(planItems.userId, userId), eq(planItems.status, "pending")));
   if (generated.length) {
     await db.insert(planItems).values(
       generated.map((g) => ({
+        userId,
         date: g.date,
         subjectId: g.subjectId,
         chapterId: g.chapterId,
@@ -405,16 +408,16 @@ export interface Stats {
   week: Array<{ date: string; planned: number; done: number; focus: number }>;
 }
 
-export async function getStats(): Promise<Stats> {
+export async function getStats(userId: number): Promise<Stats> {
   const today = todayStr();
   const [profile, subs, chps, tchs, items, revs, sessions] = await Promise.all([
-    getProfile(),
-    db.select().from(subjects).orderBy(asc(subjects.orderIndex)),
-    db.select().from(chapters).orderBy(asc(chapters.orderIndex)),
-    db.select().from(teachers),
-    db.select().from(planItems),
-    db.select().from(revisions),
-    db.select().from(focusSessions),
+    getProfile(userId),
+    db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
+    db.select().from(chapters).where(eq(chapters.userId, userId)).orderBy(asc(chapters.orderIndex)),
+    db.select().from(teachers).where(eq(teachers.userId, userId)),
+    db.select().from(planItems).where(eq(planItems.userId, userId)),
+    db.select().from(revisions).where(eq(revisions.userId, userId)),
+    db.select().from(focusSessions).where(eq(focusSessions.userId, userId)),
   ]);
 
   const doneLectureItems = items.filter((i) => i.status === "done" && i.kind === "lecture");
@@ -566,13 +569,13 @@ function localDateOf(d: Date): string {
 /* Misc queries                                                        */
 /* ------------------------------------------------------------------ */
 
-export async function getTodayBundle(date: string) {
+export async function getTodayBundle(userId: number, date: string) {
   const [profile, items, subs, note, sessions] = await Promise.all([
-    getProfile(),
-    db.select().from(planItems).where(eq(planItems.date, date)).orderBy(asc(planItems.id)),
-    db.select().from(subjects).orderBy(asc(subjects.orderIndex)),
-    db.select().from(dayNotes).where(eq(dayNotes.date, date)).limit(1),
-    db.select().from(focusSessions).where(eq(focusSessions.date, date)),
+    getProfile(userId),
+    db.select().from(planItems).where(and(eq(planItems.userId, userId), eq(planItems.date, date))).orderBy(asc(planItems.id)),
+    db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
+    db.select().from(dayNotes).where(and(eq(dayNotes.userId, userId), eq(dayNotes.date, date))).limit(1),
+    db.select().from(focusSessions).where(and(eq(focusSessions.userId, userId), eq(focusSessions.date, date))),
   ]);
   const subjMap = new Map(subs.map((s) => [s.id, s]));
   return {
@@ -584,28 +587,28 @@ export async function getTodayBundle(date: string) {
   };
 }
 
-export async function getBacklogs() {
+export async function getBacklogs(userId: number) {
   const today = todayStr();
   const [subs, items] = await Promise.all([
-    db.select().from(subjects).orderBy(asc(subjects.orderIndex)),
+    db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
     db
       .select()
       .from(planItems)
-      .where(and(lt(planItems.date, today), eq(planItems.status, "pending")))
+      .where(and(eq(planItems.userId, userId), lt(planItems.date, today), eq(planItems.status, "pending")))
       .orderBy(asc(planItems.date)),
   ]);
   const subjMap = new Map(subs.map((s) => [s.id, s]));
   return items.map((i) => ({ ...i, subject: subjMap.get(i.subjectId) }));
 }
 
-export async function getRevisionData() {
+export async function getRevisionData(userId: number) {
   const [chps, revs, items] = await Promise.all([
-    db.select().from(chapters).orderBy(asc(chapters.orderIndex)),
-    db.select().from(revisions),
+    db.select().from(chapters).where(eq(chapters.userId, userId)).orderBy(asc(chapters.orderIndex)),
+    db.select().from(revisions).where(eq(revisions.userId, userId)),
     db
       .select({ chapterId: planItems.chapterId, n: sql<number>`count(*)::int` })
       .from(planItems)
-      .where(and(eq(planItems.status, "done"), eq(planItems.kind, "lecture")))
+      .where(and(eq(planItems.userId, userId), eq(planItems.status, "done"), eq(planItems.kind, "lecture")))
       .groupBy(planItems.chapterId),
   ]);
   const doneMap = new Map(items.map((r) => [r.chapterId, r.n]));
@@ -619,10 +622,14 @@ export async function getRevisionData() {
   return { completed, inProgress, revMap, doneMap };
 }
 
-export async function getTrackerData() {
-  const stats = await getStats();
+export async function getTrackerData(userId: number) {
+  const stats = await getStats(userId);
   const today = todayStr();
-  const items = await db.select().from(planItems).orderBy(asc(planItems.date), asc(planItems.id));
+  const items = await db
+    .select()
+    .from(planItems)
+    .where(eq(planItems.userId, userId))
+    .orderBy(asc(planItems.date), asc(planItems.id));
   const itemsByChapter = new Map<number, PlanItem[]>();
   for (const i of items) {
     if (i.chapterId == null || i.kind !== "lecture") continue;
