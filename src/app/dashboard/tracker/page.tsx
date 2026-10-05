@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TrackerPage() {
   const user = await requireUser();
-  const { stats, itemsByChapter, today } = await getTrackerData(user.id);
+  const { stats, itemsByChapter, today, checksByChapter } = await getTrackerData(user.id);
 
   const subjects: TrackerSubject[] = stats.bySubject.map((s) => ({
     id: s.subject.id,
@@ -41,6 +41,13 @@ export default async function TrackerPage() {
         done: c.doneLectures,
         archived: !c.active,
         pills,
+        teacher: c.teacherName,
+        checks: {
+          dpp: checksByChapter.get(c.id)?.dpp ?? false,
+          notes: checksByChapter.get(c.id)?.notes ?? false,
+          ncert: checksByChapter.get(c.id)?.ncert ?? false,
+          pyq: checksByChapter.get(c.id)?.pyq ?? false,
+        },
       };
     }),
   }));

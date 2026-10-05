@@ -23,7 +23,7 @@ function SmoothScroll() {
 
 export function ThemeProviders({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange={false}>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange={false}>
       <SmoothScroll />
       {children}
     </ThemeProvider>

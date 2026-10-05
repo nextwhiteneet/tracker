@@ -75,7 +75,7 @@ export function AuthForm({ requireInvite }: { requireInvite: boolean }) {
               autoComplete="username"
               autoCapitalize="none"
               spellCheck={false}
-              placeholder="e.g. aarav_2028"
+              placeholder="e.g. ashu.nambardar"
               maxLength={24}
               required
             />

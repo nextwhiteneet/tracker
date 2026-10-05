@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   numeric,
+  jsonb,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
@@ -19,6 +20,8 @@ export const profiles = pgTable("profiles", {
   examName: text("exam_name").notNull().default("NEET"),
   examDate: text("exam_date").notNull().default(""),
   startDate: text("start_date").notNull().default(""),
+  syllabusDeadline: text("syllabus_deadline").notNull().default(""), // finish all lectures by
+  selfStudyRatio: numeric("self_study_ratio", { precision: 3, scale: 2 }).notNull().default("1.00"), // self-study hours per lecture hour
   dailyTargetMinutes: integer("daily_target_minutes").notNull().default(360),
   speed: numeric("speed", { precision: 3, scale: 2 }).notNull().default("1.25"),
   style: text("style").notNull().default("steady"), // steady | intense | chill
@@ -64,6 +67,10 @@ export const chapters = pgTable(
     name: text("name").notNull(),
     classLevel: integer("class_level").notNull().default(11),
     totalLectures: integer("total_lectures").notNull().default(4),
+    /** Duration (minutes) of every single lecture, index 0 = lecture 1. Empty = use subject default. */
+    lectureMinutes: jsonb("lecture_minutes").$type<number[]>().notNull().default([]),
+    /** Teacher whose lectures the student follows for this chapter. */
+    teacherName: text("teacher_name").notNull().default(""),
     orderIndex: integer("order_index").notNull().default(0),
     active: boolean("active").notNull().default(true),
   },
@@ -149,6 +156,22 @@ export const dayNotes = pgTable(
   (t) => [uniqueIndex("day_notes_user_date_idx").on(t.userId, t.date)]
 );
 
+/** Per-chapter practice checklist (DPP / notes / NCERT / PYQs), inspired by PW Tracker 360. */
+export const chapterChecks = pgTable(
+  "chapter_checks",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    chapterId: integer("chapter_id").notNull(),
+    dpp: boolean("dpp").notNull().default(false),
+    notes: boolean("notes").notNull().default(false),
+    ncert: boolean("ncert").notNull().default(false),
+    pyq: boolean("pyq").notNull().default(false),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("chapter_checks_chapter_idx").on(t.chapterId), index("chapter_checks_user_idx").on(t.userId)]
+);
+
 /* ------------------------------------------------------------------ */
 /* Accounts                                                            */
 /* ------------------------------------------------------------------ */
@@ -189,3 +212,4 @@ export type Chapter = typeof chapters.$inferSelect;
 export type RoutineRow = typeof routine.$inferSelect;
 export type PlanItem = typeof planItems.$inferSelect;
 export type RevisionRow = typeof revisions.$inferSelect;
+export type ChapterChecks = typeof chapterChecks.$inferSelect;

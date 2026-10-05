@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Check, PartyPopper, StickyNote, Timer } from "lucide-react";
+import { Check, GraduationCap, PartyPopper, StickyNote, Timer } from "lucide-react";
 import { TickButton, burst } from "./tick";
 import { SubjectGlyph } from "./ui";
 import { fmtMinutes } from "@/lib/utils";
@@ -16,6 +16,7 @@ export interface TodayItem {
   subjectName: string;
   subjectColor: string;
   subjectIcon: string;
+  teacherName: string;
 }
 
 export function TodayPlan({
@@ -55,6 +56,9 @@ export function TodayPlan({
   }
 
   const allDone = doneCount === items.length;
+  const teachersToday = Array.from(
+    new Set(items.filter((i) => i.kind !== "revision" && i.teacherName).map((i) => i.teacherName))
+  );
 
   return (
     <div className="card p-5 md:p-6">
@@ -64,6 +68,12 @@ export function TodayPlan({
           {doneCount}/{items.length} · {fmtMinutes(doneMin)} / {fmtMinutes(totalMin)}
         </span>
       </div>
+
+      {teachersToday.length > 0 && (
+        <div className="-mt-2 mb-4 flex items-center gap-1.5 text-[12px] text-ink-2">
+          <GraduationCap size={13} /> {isToday ? "Today's lectures" : "Lectures"} by {teachersToday.join(", ")}
+        </div>
+      )}
 
       {allDone && (
         <div className="anim-pop mb-5 rounded-2xl border border-[var(--good)]/30 bg-[var(--good-soft)] px-4 py-3 text-[13.5px] text-[var(--good)] font-medium flex items-center gap-2">
@@ -88,6 +98,11 @@ export function TodayPlan({
                 <div className="text-[11.5px] text-ink-2 mt-0.5 flex items-center gap-1.5">
                   <span style={{ color: it.subjectColor }} className="font-medium">{it.subjectName}</span>
                   {!revision && <span>· Lecture {it.lectureIndex}</span>}
+                  {!revision && it.teacherName && (
+                    <span className="inline-flex items-center gap-1">
+                      · <GraduationCap size={11} /> {it.teacherName}
+                    </span>
+                  )}
                   <span>· </span>
                   <span className="inline-flex items-center gap-1">
                     <Timer size={11} /> {fmtMinutes(it.minutes)}

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { BookMarked, History, RotateCcw } from "lucide-react";
 import { SubjectGlyph, ProgressBar } from "./ui";
-import { fmtDate } from "@/lib/utils";
+import { fmtDate, todayStr } from "@/lib/utils";
 
 export interface RevChapter {
   id: number;
@@ -42,7 +42,7 @@ export function RevisionClient({
       rs.map((r) =>
         r.id === chapterId
           ? action === "round"
-            ? { ...r, rounds: r.rounds + 1, lastRevisedOn: new Date().toISOString().slice(0, 10) }
+            ? { ...r, rounds: r.rounds + 1, lastRevisedOn: todayStr() }
             : { ...r, confidence: r.confidence === value ? 0 : (value ?? 0) }
           : r
       )

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { X, Plus, Minus, Trash2, Eye, EyeOff, ChevronDown } from "lucide-react";
+import { X, Plus, Minus, Trash2, Eye, EyeOff, ChevronDown, Timer, Sparkles, GraduationCap } from "lucide-react";
 import { SUBJECT_COLORS, SUBJECT_ICONS, DEFAULT_SYLLABUS, defaultExamDate } from "@/lib/syllabus";
 import { SubjectGlyph } from "./ui";
-import { WEEKDAYS, todayStr } from "@/lib/utils";
+import { WEEKDAYS, todayStr, addDays, fmtDate, fmtMinutes } from "@/lib/utils";
+import { designFromDeadline } from "@/lib/deadline";
 
 /* ------------------------------------------------------------------ */
 /* Draft types (client-side editable config)                           */
@@ -17,6 +18,11 @@ export interface ChapterDraft {
   cls: number;
   lectures: number;
   active: boolean;
+  /** minutes of every lecture; length always equals `lectures` */
+  lectureMinutes: number[];
+  teacher: string;
+  /** lectures already finished (read-only, used for the deadline maths) */
+  done?: number;
 }
 export interface SubjectDraft {
   id?: number;
@@ -38,6 +44,8 @@ export interface ProfileDraft {
   motto: string;
   examDate: string;
   startDate: string;
+  syllabusDeadline: string;
+  selfStudyRatio: number;
   dailyTargetMinutes: number;
   speed: number;
   style: string;
@@ -53,6 +61,20 @@ export interface Draft {
 
 export const uid = () => Math.random().toString(36).slice(2, 9);
 
+/** Resize a per-lecture duration list to `n` lectures (new ones get `fill`). */
+export function fitMinutes(list: number[], n: number, fill: number): number[] {
+  const out = list.slice(0, n);
+  while (out.length < n) out.push(fill);
+  return out;
+}
+
+/** Default syllabus deadline: ~2 months before the exam, never earlier than a month from start. */
+export function defaultDeadline(examDate: string, startDate: string): string {
+  const byExam = addDays(examDate, -60);
+  const minimum = addDays(startDate, 30);
+  return byExam > minimum ? byExam : minimum < examDate ? minimum : examDate;
+}
+
 export function draftFromDefaults(name = ""): Draft {
   const today = todayStr();
   const subjects: SubjectDraft[] = DEFAULT_SYLLABUS.map((s) => ({
@@ -62,7 +84,15 @@ export function draftFromDefaults(name = ""): Draft {
     icon: s.icon,
     lectureLength: s.lectureLength,
     teachers: [],
-    chapters: s.chapters.map((c) => ({ key: uid(), name: c.name, cls: c.cls, lectures: c.lectures, active: true })),
+    chapters: s.chapters.map((c) => ({
+      key: uid(),
+      name: c.name,
+      cls: c.cls,
+      lectures: c.lectures,
+      active: true,
+      lectureMinutes: Array(c.lectures).fill(s.lectureLength),
+      teacher: "",
+    })),
   }));
   return {
     profile: {
@@ -70,6 +100,8 @@ export function draftFromDefaults(name = ""): Draft {
       motto: "",
       examDate: defaultExamDate(),
       startDate: today,
+      syllabusDeadline: defaultDeadline(defaultExamDate(), today),
+      selfStudyRatio: 1,
       dailyTargetMinutes: 360,
       speed: 1.25,
       style: "steady",
@@ -237,7 +269,7 @@ export function ProfileEditor({
     <div className="grid sm:grid-cols-2 gap-4">
       <label className="block">
         <span className="eyebrow block mb-1.5">Your name</span>
-        <input className="input" value={p.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Aarav Sharma" />
+        <input className="input" value={p.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Ashu Nambardar" />
       </label>
       <label className="block">
         <span className="eyebrow block mb-1.5">Personal motto (optional)</span>
@@ -250,6 +282,20 @@ export function ProfileEditor({
       <label className="block">
         <span className="eyebrow block mb-1.5">Preparation starts</span>
         <input type="date" className="input" value={p.startDate} onChange={(e) => set({ startDate: e.target.value })} />
+      </label>
+      <label className="block sm:col-span-2">
+        <span className="eyebrow block mb-1.5">I want to finish the whole syllabus by</span>
+        <input
+          type="date"
+          className="input"
+          value={p.syllabusDeadline}
+          min={p.startDate}
+          max={p.examDate}
+          onChange={(e) => set({ syllabusDeadline: e.target.value })}
+        />
+        <span className="block text-[11.5px] text-ink-2 mt-1.5">
+          Your daily lectures and study hours are designed backwards from this date — the time between it and NEET is left for revision and mock tests.
+        </span>
       </label>
       <div className="sm:col-span-2 flex items-center justify-between rounded-2xl border border-line px-4 py-3">
         <div>
@@ -337,7 +383,19 @@ export function SubjectsEditor({
           </div>
           <div className="mt-4">
             <div className="eyebrow !text-[10px] mb-2">Teachers of {s.name} — add everyone whose lectures you watch</div>
-            <ChipEditor values={s.teachers} onChange={(t) => setSubject(s.key, { teachers: t })} placeholder="Teacher's name" />
+            <ChipEditor
+              values={s.teachers}
+              onChange={(t) => {
+                const gone = s.teachers.filter((x) => !t.includes(x));
+                setSubject(s.key, {
+                  teachers: t,
+                  chapters: gone.length
+                    ? s.chapters.map((c) => (gone.includes(c.teacher) ? { ...c, teacher: "" } : c))
+                    : s.chapters,
+                });
+              }}
+              placeholder="Teacher's name"
+            />
           </div>
         </div>
       ))}
@@ -379,6 +437,19 @@ export function ChaptersEditor({
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(draft.subjects.map((s, i) => [s.key, i === 0]))
   );
+  const [timesOpen, setTimesOpen] = useState<Record<string, boolean>>({});
+  const [bulkMin, setBulkMin] = useState<Record<string, number>>({});
+  const [bulkTeacher, setBulkTeacher] = useState<Record<string, string>>({});
+
+  const setChapter = (sKey: string, cKey: string, fn: (c: ChapterDraft, s: SubjectDraft) => Partial<ChapterDraft>) =>
+    update((d) => ({
+      ...d,
+      subjects: d.subjects.map((x) =>
+        x.key === sKey
+          ? { ...x, chapters: x.chapters.map((y) => (y.key === cKey ? { ...y, ...fn(y, x) } : y)) }
+          : x
+      ),
+    }));
 
   return (
     <div className="space-y-4">
@@ -389,7 +460,7 @@ export function ChaptersEditor({
         onChange={(e) => setQ(e.target.value)}
       />
       <p className="text-[12px] text-ink-2 -mt-1">
-        Preloaded with the full NEET syllabus. Set lecture counts to match <em>your</em> batch or video source — this is what drives your whole plan.
+        Preloaded with the full NEET syllabus. For every chapter set the lecture count, <em>how long each lecture is</em> and <em>which teacher</em> you follow — this is what drives your whole plan.
       </p>
       {draft.subjects.map((s) => {
         const visible = s.chapters.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
@@ -409,89 +480,171 @@ export function ChaptersEditor({
             </button>
             {isOpen && (
               <div className="border-t border-line divide-y divide-line">
-                {visible.map((c) => (
-                  <div key={c.key} className="flex items-center gap-3 px-5 py-2.5 group">
-                    <button
-                      type="button"
-                      title={c.active ? "Exclude from plan" : "Include in plan"}
-                      onClick={() =>
-                        update((d) => ({
-                          ...d,
-                          subjects: d.subjects.map((x) =>
-                            x.key === s.key
-                              ? { ...x, chapters: x.chapters.map((y) => (y.key === c.key ? { ...y, active: !y.active } : y)) }
-                              : x
-                          ),
-                        }))
-                      }
-                      className={`transition-colors ${c.active ? "text-ink-2 hover:text-ink" : "text-ink-3"}`}
-                    >
-                      {c.active ? <Eye size={15} /> : <EyeOff size={15} />}
-                    </button>
-                    <input
-                      className={`input !border-0 !bg-transparent !p-0 !shadow-none flex-1 text-[13.5px] ${!c.active ? "line-through text-ink-3" : ""}`}
-                      value={c.name}
-                      onChange={(e) =>
-                        update((d) => ({
-                          ...d,
-                          subjects: d.subjects.map((x) =>
-                            x.key === s.key
-                              ? { ...x, chapters: x.chapters.map((y) => (y.key === c.key ? { ...y, name: e.target.value } : y)) }
-                              : x
-                          ),
-                        }))
-                      }
-                    />
-                    <Segmented
-                      options={[
-                        { value: 11, label: "XI" },
-                        { value: 12, label: "XII" },
-                      ]}
-                      value={c.cls}
-                      onChange={(v) =>
-                        update((d) => ({
-                          ...d,
-                          subjects: d.subjects.map((x) =>
-                            x.key === s.key
-                              ? { ...x, chapters: x.chapters.map((y) => (y.key === c.key ? { ...y, cls: v } : y)) }
-                              : x
-                          ),
-                        }))
-                      }
-                    />
-                    <Stepper
-                      value={c.lectures}
-                      onChange={(v) =>
-                        update((d) => ({
-                          ...d,
-                          subjects: d.subjects.map((x) =>
-                            x.key === s.key
-                              ? { ...x, chapters: x.chapters.map((y) => (y.key === c.key ? { ...y, lectures: v } : y)) }
-                              : x
-                          ),
-                        }))
-                      }
-                      min={1}
-                      max={30}
-                      width="w-[6.4rem]"
-                    />
-                    <button
-                      type="button"
-                      aria-label="delete chapter"
-                      className="text-ink-3 hover:text-[var(--bad)] opacity-0 group-hover:opacity-100 transition-all"
-                      onClick={() =>
-                        update((d) => ({
-                          ...d,
-                          subjects: d.subjects.map((x) =>
-                            x.key === s.key ? { ...x, chapters: x.chapters.filter((y) => y.key !== c.key) } : x
-                          ),
-                        }))
-                      }
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                <datalist id={`tl-${s.key}`}>
+                  {s.teachers.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+                <div className="flex flex-wrap items-center gap-2 px-5 py-3 bg-surface-2">
+                  <GraduationCap size={14} className="text-ink-3" />
+                  <span className="text-[12px] text-ink-2">Same teacher for every {s.name} chapter:</span>
+                  <input
+                    list={`tl-${s.key}`}
+                    className="input !py-1 !px-2.5 !w-44 text-[12.5px]"
+                    placeholder="Teacher's name"
+                    value={bulkTeacher[s.key] ?? ""}
+                    onChange={(e) => setBulkTeacher((b) => ({ ...b, [s.key]: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    disabled={!(bulkTeacher[s.key] ?? "").trim()}
+                    onClick={() => {
+                      const name = (bulkTeacher[s.key] ?? "").trim();
+                      update((d) => ({
+                        ...d,
+                        subjects: d.subjects.map((x) =>
+                          x.key === s.key ? { ...x, chapters: x.chapters.map((y) => ({ ...y, teacher: name })) } : x
+                        ),
+                      }));
+                    }}
+                  >
+                    Apply to all
+                  </button>
+                </div>
+                {visible.map((c) => {
+                  const avg = c.lectureMinutes.length
+                    ? Math.round(c.lectureMinutes.reduce((a, b) => a + b, 0) / c.lectureMinutes.length)
+                    : s.lectureLength;
+                  return (
+                    <div key={c.key} className="group">
+                      <div className="flex items-center gap-3 px-5 py-2.5">
+                        <button
+                          type="button"
+                          title={c.active ? "Exclude from plan" : "Include in plan"}
+                          onClick={() => setChapter(s.key, c.key, (y) => ({ active: !y.active }))}
+                          className={`transition-colors ${c.active ? "text-ink-2 hover:text-ink" : "text-ink-3"}`}
+                        >
+                          {c.active ? <Eye size={15} /> : <EyeOff size={15} />}
+                        </button>
+                        <input
+                          className={`input !border-0 !bg-transparent !p-0 !shadow-none flex-1 text-[13.5px] ${!c.active ? "line-through text-ink-3" : ""}`}
+                          value={c.name}
+                          onChange={(e) => setChapter(s.key, c.key, () => ({ name: e.target.value }))}
+                        />
+                        <Segmented
+                          options={[
+                            { value: 11, label: "XI" },
+                            { value: 12, label: "XII" },
+                          ]}
+                          value={c.cls}
+                          onChange={(v) => setChapter(s.key, c.key, () => ({ cls: v }))}
+                        />
+                        <Stepper
+                          value={c.lectures}
+                          onChange={(v) =>
+                            setChapter(s.key, c.key, (y, x) => ({
+                              lectures: v,
+                              lectureMinutes: fitMinutes(y.lectureMinutes, v, x.lectureLength),
+                            }))
+                          }
+                          min={1}
+                          max={30}
+                          width="w-[6.4rem]"
+                        />
+                        <button
+                          type="button"
+                          aria-label="delete chapter"
+                          className="text-ink-3 hover:text-[var(--bad)] opacity-0 group-hover:opacity-100 transition-all"
+                          onClick={() =>
+                            update((d) => ({
+                              ...d,
+                              subjects: d.subjects.map((x) =>
+                                x.key === s.key ? { ...x, chapters: x.chapters.filter((y) => y.key !== c.key) } : x
+                              ),
+                            }))
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+
+                      {c.active && (
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-3 pl-[3.4rem] -mt-1">
+                          <label className="flex items-center gap-2">
+                            <GraduationCap size={13} className="text-ink-3 flex-none" />
+                            <input
+                              list={`tl-${s.key}`}
+                              className="input !py-1 !px-2.5 !w-48 text-[12.5px]"
+                              placeholder="Teacher for this chapter"
+                              value={c.teacher}
+                              onChange={(e) => setChapter(s.key, c.key, () => ({ teacher: e.target.value }))}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setTimesOpen((o) => ({ ...o, [c.key]: !o[c.key] }))}
+                          >
+                            <Timer size={12} /> Lecture lengths · avg {avg}m
+                            <ChevronDown size={12} className={`transition-transform duration-300 ${timesOpen[c.key] ? "rotate-180" : ""}`} />
+                          </button>
+                        </div>
+                      )}
+
+                      {c.active && timesOpen[c.key] && (
+                        <div className="px-5 pb-4 pl-[3.4rem]">
+                          <div className="rounded-xl border border-line bg-surface-2 p-3.5">
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              <span className="text-[12px] text-ink-2">Set every lecture of this chapter to</span>
+                              <Stepper
+                                value={bulkMin[c.key] ?? s.lectureLength}
+                                onChange={(v) => setBulkMin((b) => ({ ...b, [c.key]: v }))}
+                                min={10}
+                                max={300}
+                                step={5}
+                                suffix="min"
+                                width="w-[8.2rem]"
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                onClick={() =>
+                                  setChapter(s.key, c.key, (y) => ({
+                                    lectureMinutes: Array(y.lectures).fill(bulkMin[c.key] ?? s.lectureLength),
+                                  }))
+                                }
+                              >
+                                Apply
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                              {c.lectureMinutes.map((m, i) => (
+                                <label key={i} className="block">
+                                  <span className="mono text-[10px] text-ink-3">Lecture {i + 1} (min)</span>
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={10}
+                                    max={600}
+                                    className="input !py-1.5 !px-2 text-[12.5px] mono"
+                                    value={m || ""}
+                                    onChange={(e) => {
+                                      const v = Math.max(0, Math.min(600, Math.round(Number(e.target.value) || 0)));
+                                      setChapter(s.key, c.key, (y) => ({
+                                        lectureMinutes: y.lectureMinutes.map((x, j) => (j === i ? v : x)),
+                                      }));
+                                    }}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 <div className="px-5 py-3">
                   <button
                     type="button"
@@ -501,7 +654,21 @@ export function ChaptersEditor({
                         ...d,
                         subjects: d.subjects.map((x) =>
                           x.key === s.key
-                            ? { ...x, chapters: [...x.chapters, { key: uid(), name: "", cls: 11, lectures: 3, active: true }] }
+                            ? {
+                                ...x,
+                                chapters: [
+                                  ...x.chapters,
+                                  {
+                                    key: uid(),
+                                    name: "",
+                                    cls: 11,
+                                    lectures: 3,
+                                    active: true,
+                                    lectureMinutes: Array(3).fill(x.lectureLength),
+                                    teacher: "",
+                                  },
+                                ],
+                              }
                             : x
                         ),
                       }))
@@ -519,6 +686,40 @@ export function ChaptersEditor({
   );
 }
 
+/** Runs the deadline planner on a draft and returns the draft with routine + daily target applied. */
+export function designDraft(d: Draft) {
+  const p = d.profile;
+  const plan = designFromDeadline({
+    today: todayStr(),
+    startDate: p.startDate,
+    deadline: p.syllabusDeadline,
+    revisionEnabled: p.revisionEnabled,
+    revisionDay: p.revisionDay,
+    speed: p.speed || 1,
+    selfStudyRatio: p.selfStudyRatio,
+    subjects: d.subjects.map((s) => ({
+      key: s.key,
+      lectureLength: s.lectureLength,
+      chapters: s.chapters.map((c) => ({
+        active: c.active,
+        name: c.name,
+        lectures: c.lectures,
+        lectureMinutes: c.lectureMinutes,
+        done: c.done,
+      })),
+    })),
+  });
+  const next: Draft =
+    plan.ok && plan.routine.length
+      ? {
+          ...d,
+          profile: { ...d.profile, dailyTargetMinutes: plan.totalMinutesPerDay },
+          routine: plan.routine.filter((r) => d.subjects.some((s) => s.key === r.subjectKey)),
+        }
+      : d;
+  return { plan, draft: next };
+}
+
 export function RoutineEditor({
   draft,
   update,
@@ -532,10 +733,53 @@ export function RoutineEditor({
       routine: [...d.routine.filter((r) => r.dayOfWeek !== dow), ...entries],
     }));
 
+  const { plan } = designDraft(draft);
+  const p = draft.profile;
+
   return (
     <div className="space-y-3">
+      <div className="rounded-2xl border border-line bg-surface-2 p-4 space-y-3">
+        <div className="eyebrow !text-[10px] flex items-center gap-1.5">
+          <Sparkles size={12} /> Designed from your syllabus deadline
+        </div>
+        {plan.ok && plan.remainingLectures > 0 ? (
+          <>
+            <p className="text-[13px] text-ink-2 leading-relaxed">
+              To finish by <b className="text-ink">{fmtDate(p.syllabusDeadline)}</b> you have{" "}
+              <b className="text-ink">{plan.studyDays}</b> study days for{" "}
+              <b className="text-ink">{plan.remainingLectures}</b> lectures — about{" "}
+              <b className="text-ink">{plan.lecturesPerDay} lectures a day</b> ({fmtMinutes(plan.lectureMinutesPerDay)} of video). Adding
+              self-study (DPPs, notes, NCERT) that is roughly{" "}
+              <b className="text-ink">{fmtMinutes(plan.totalMinutesPerDay)} of study a day</b>.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[12px] text-ink-2">Self-study per lecture hour</span>
+              <Segmented
+                options={[
+                  { value: 0.5, label: "0.5×" },
+                  { value: 1, label: "1×" },
+                  { value: 1.5, label: "1.5×" },
+                  { value: 2, label: "2×" },
+                ]}
+                value={p.selfStudyRatio}
+                onChange={(v) => update((d) => ({ ...d, profile: { ...d.profile, selfStudyRatio: v } }))}
+              />
+              <button type="button" className="btn btn-accent btn-sm" onClick={() => update((d) => designDraft(d).draft)}>
+                <Sparkles size={14} /> Design my routine &amp; daily hours
+              </button>
+            </div>
+            {plan.capped && (
+              <p className="text-[12px] text-[var(--warn)]">
+                A subject needs more than 12 lectures on some days — move the deadline later or add study days.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-[13px] text-ink-2">{plan.reason ?? "Set a syllabus deadline in the first step."}</p>
+        )}
+      </div>
       <p className="text-[12px] text-ink-2">
-        Which subjects do you study on which day, and how many lectures? Leave a day empty for a weekly break — the plan engine respects it.
+        Which subjects do you study on which day, and how many lectures? Leave a day empty for a weekly break — the plan engine respects it. You can still edit anything below.
       </p>
       {[1, 2, 3, 4, 5, 6, 0].map((dow) => {
         const entries = draft.routine

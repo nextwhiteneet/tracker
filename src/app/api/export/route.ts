@@ -11,6 +11,7 @@ import {
   revisions,
   focusSessions,
   dayNotes,
+  chapterChecks,
 } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -20,7 +21,7 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
   const uid = user.id;
-  const [p, s, t, c, r, pi, rv, fs, dn] = await Promise.all([
+  const [p, s, t, c, r, pi, rv, fs, dn, cc] = await Promise.all([
     db.select().from(profiles).where(eq(profiles.userId, uid)),
     db.select().from(subjects).where(eq(subjects.userId, uid)),
     db.select().from(teachers).where(eq(teachers.userId, uid)),
@@ -30,6 +31,7 @@ export async function GET() {
     db.select().from(revisions).where(eq(revisions.userId, uid)),
     db.select().from(focusSessions).where(eq(focusSessions.userId, uid)),
     db.select().from(dayNotes).where(eq(dayNotes.userId, uid)),
+    db.select().from(chapterChecks).where(eq(chapterChecks.userId, uid)),
   ]);
   return NextResponse.json({
     exportedAt: new Date().toISOString(),
@@ -43,5 +45,6 @@ export async function GET() {
     revisions: rv,
     focusSessions: fs,
     dayNotes: dn,
+    chapterChecks: cc,
   });
 }

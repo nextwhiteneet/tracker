@@ -4,9 +4,17 @@ export function cn(...parts: Array<string | false | null | undefined>) {
 
 /* ---------- Date helpers (all local, string based "YYYY-MM-DD") ---------- */
 
+/** The app is built for NEET aspirants in India, so "today" always means today in IST — the
+ *  server (UTC on Vercel) and every browser then agree on the date. */
+const APP_TZ = "Asia/Kolkata";
+
 export function todayStr(): string {
-  const d = new Date();
-  return toStr(d);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 export function toStr(d: Date): string {
@@ -54,8 +62,8 @@ export function fmtDay(s: string): string {
   return `${WEEKDAYS[dayOfWeek(s)]}, ${fmtDate(s)}`;
 }
 
-export function greeting(): string {
-  const h = new Date().getHours();
+export function greeting(hour: number = new Date().getHours()): string {
+  const h = hour;
   if (h < 5) return "Burning the midnight oil";
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";

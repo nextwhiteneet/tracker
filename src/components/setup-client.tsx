@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -24,10 +24,12 @@ import {
   ChaptersEditor,
   RoutineEditor,
   EngineEditor,
-  uid,
+  designDraft,
+  fitMinutes,
+  defaultDeadline,
 } from "./config-editors";
 import { generatePlan, summarizeItems } from "@/lib/planner";
-import { fmtDate, fmtMinutes, diffDays } from "@/lib/utils";
+import { fmtDate, fmtMinutes, diffDays, todayStr } from "@/lib/utils";
 
 export interface ConfigJsonSubject {
   id: number;
@@ -37,7 +39,16 @@ export interface ConfigJsonSubject {
   icon: string;
   lectureLength: number;
   teachers: string[];
-  chapters: Array<{ id: number; name: string; cls: number; lectures: number; active: boolean; doneLectures: number }>;
+  chapters: Array<{
+    id: number;
+    name: string;
+    cls: number;
+    lectures: number;
+    active: boolean;
+    doneLectures: number;
+    lectureMinutes: number[];
+    teacher: string;
+  }>;
 }
 export interface ConfigJson {
   isEmpty: boolean;
@@ -46,6 +57,8 @@ export interface ConfigJson {
     motto: string;
     examDate: string;
     startDate: string;
+    syllabusDeadline: string;
+    selfStudyRatio: string;
     dailyTargetMinutes: number;
     speed: string;
     style: string;
@@ -65,6 +78,8 @@ export function draftFromConfig(c: ConfigJson): Draft {
       motto: c.profile.motto,
       examDate: c.profile.examDate,
       startDate: c.profile.startDate,
+      syllabusDeadline: c.profile.syllabusDeadline || defaultDeadline(c.profile.examDate, c.profile.startDate),
+      selfStudyRatio: Number(c.profile.selfStudyRatio) || 1,
       dailyTargetMinutes: c.profile.dailyTargetMinutes,
       speed: Number(c.profile.speed) || 1.25,
       style: c.profile.style,
@@ -87,6 +102,9 @@ export function draftFromConfig(c: ConfigJson): Draft {
         cls: ch.cls,
         lectures: ch.lectures,
         active: ch.active,
+        lectureMinutes: fitMinutes(ch.lectureMinutes ?? [], ch.lectures, s.lectureLength),
+        teacher: ch.teacher ?? "",
+        done: ch.doneLectures,
       })),
     })),
     routine: c.routine.map((r) => ({ ...r })),
@@ -100,6 +118,8 @@ export function toPayload(draft: Draft, setupCompleted: boolean) {
       motto: draft.profile.motto.trim(),
       examDate: draft.profile.examDate,
       startDate: draft.profile.startDate,
+      syllabusDeadline: draft.profile.syllabusDeadline,
+      selfStudyRatio: draft.profile.selfStudyRatio,
       dailyTargetMinutes: draft.profile.dailyTargetMinutes,
       speed: draft.profile.speed,
       style: draft.profile.style,
@@ -114,10 +134,23 @@ export function toPayload(draft: Draft, setupCompleted: boolean) {
       color: s.color,
       icon: s.icon,
       lectureLength: s.lectureLength,
-      teachers: s.teachers.filter(Boolean),
+      // teachers typed straight into a chapter are added to the subject's teacher list too
+      teachers: Array.from(
+        new Set([...s.teachers, ...s.chapters.map((c) => c.teacher.trim())].map((t) => t.trim()).filter(Boolean))
+      ),
       chapters: s.chapters
         .filter((c) => c.name.trim())
-        .map((c) => ({ id: c.id, name: c.name.trim(), cls: c.cls, lectures: c.lectures, active: c.active })),
+        .map((c) => ({
+          id: c.id,
+          name: c.name.trim(),
+          cls: c.cls,
+          lectures: c.lectures,
+          active: c.active,
+          lectureMinutes: fitMinutes(c.lectureMinutes, c.lectures, s.lectureLength).map((m) =>
+            m >= 10 ? Math.min(600, m) : s.lectureLength
+          ),
+          teacher: c.teacher.trim(),
+        })),
     })),
     routine: draft.routine.filter((r) => draft.subjects.some((s) => s.key === r.subjectKey)),
     setupCompleted,
@@ -133,13 +166,17 @@ export function usePlanPreview(draft: Draft, doneByChapter: Record<number, numbe
       lectureLength: s.lectureLength,
       chapters: s.chapters
         .filter((c) => c.active && c.name.trim())
-        .map((c) => ({ id: c.id ?? -(keyToNum.get(s.key)! * 1000 + Math.abs(hashKey(c.key))), totalLectures: c.lectures })),
+        .map((c) => ({
+          id: c.id ?? -(keyToNum.get(s.key)! * 1000 + Math.abs(hashKey(c.key))),
+          totalLectures: c.lectures,
+          lectureMinutes: c.lectureMinutes,
+        })),
     }));
     const routine = draft.routine
       .filter((r) => keyToNum.has(r.subjectKey))
       .map((r) => ({ dayOfWeek: r.dayOfWeek, subjectId: keyToNum.get(r.subjectKey)!, lectures: r.lectures }));
     const items = generatePlan({
-      today: new Date().toISOString().slice(0, 10),
+      today: todayStr(),
       startDate: draft.profile.startDate,
       speed: draft.profile.speed || 1,
       style: draft.profile.style,
@@ -163,9 +200,9 @@ function hashKey(k: string) {
 
 const STEPS = [
   { id: "profile", label: "You", icon: User, title: "First — who is going to be a doctor?", sub: "Your name and your exam date. Everything else bends around these." },
-  { id: "subjects", label: "Subjects", icon: BookCopy, title: "Your subjects & your teachers", sub: "Four NEET subjects are preloaded. Add the teachers whose lectures you actually watch — you fill these in." },
-  { id: "chapters", label: "Chapters", icon: ClipboardCheck, title: "Chapters & lecture counts", sub: "The full syllabus is preloaded. Set the lecture count of each chapter to match your batch — I can't know your batch, you can." },
-  { id: "routine", label: "Routine", icon: CalendarRange, title: "Your weekly routine", sub: "Which subjects on which days, and how many lectures. Empty days are rest days." },
+  { id: "subjects", label: "Subjects", icon: BookCopy, title: "Your subjects & your teachers", sub: "Four NEET subjects are preloaded. Add the teachers whose lectures you actually watch — you will pick one for every chapter next." },
+  { id: "chapters", label: "Chapters", icon: ClipboardCheck, title: "Chapters & lecture counts", sub: "The full syllabus is preloaded. For every chapter set the lecture count, the length of each lecture and the teacher you follow — I can't know your batch, you can." },
+  { id: "routine", label: "Routine", icon: CalendarRange, title: "Your weekly routine", sub: "Designed backwards from your syllabus deadline. Which subjects on which days, and how many lectures — empty days are rest days." },
   { id: "engine", label: "Engine", icon: SlidersHorizontal, title: "Tune the engine", sub: "Playback speed, study style and your weekly revision ritual." },
   { id: "review", label: "Ignite", icon: Rocket, title: "Review & ignite", sub: "Here is the plan the engine built for you. If it looks right, light it up." },
 ];
@@ -176,6 +213,7 @@ export default function SetupWizard({ config }: { config: ConfigJson }) {
   const [draft, setDraft] = useState<Draft>(() => draftFromConfig(config));
   const [saving, startSave] = useTransition();
   const [error, setError] = useState("");
+  const autoDesigned = useRef(false);
 
   const doneByChapter = useMemo(() => {
     const m: Record<number, number> = {};
@@ -192,6 +230,10 @@ export default function SetupWizard({ config }: { config: ConfigJson }) {
   );
   const doneLectures = Object.values(doneByChapter).reduce((a, b) => a + b, 0);
   const finishDelta = preview.items.length ? diffDays(preview.summary.finishDate, draft.profile.examDate) : null;
+  const deadlineDelta =
+    preview.items.length && draft.profile.syllabusDeadline
+      ? diffDays(preview.summary.finishDate, draft.profile.syllabusDeadline)
+      : null;
   const canNext = step === 0 ? draft.profile.name.trim().length > 0 && !!draft.profile.examDate : true;
 
   const save = () => {
@@ -263,7 +305,17 @@ export default function SetupWizard({ config }: { config: ConfigJson }) {
               <div className="grid sm:grid-cols-3 gap-4">
                 {[
                   { l: "Lectures to go", v: Math.max(0, totalLectures - doneLectures), s: `${draft.subjects.reduce((a, s) => a + s.chapters.filter((c) => c.active && c.name.trim()).length, 0)} active chapters` },
-                  { l: "Est. finish", v: preview.items.length ? fmtDate(preview.summary.finishDate) : "—", s: finishDelta === null ? "all done" : finishDelta >= 0 ? `${finishDelta} days before NEET` : `${Math.abs(finishDelta)} days past NEET — add load` },
+                  { l: "Est. finish", v: preview.items.length ? fmtDate(preview.summary.finishDate) : "—", s:
+                      deadlineDelta !== null
+                        ? deadlineDelta >= 0
+                          ? `${deadlineDelta} days before your syllabus target`
+                          : `${Math.abs(deadlineDelta)} days after your target — redesign on the Routine step`
+                        : finishDelta === null
+                          ? "all done"
+                          : finishDelta >= 0
+                            ? `${finishDelta} days before NEET`
+                            : `${Math.abs(finishDelta)} days past NEET — add load`,
+                  },
                   { l: "Study load", v: preview.summary.avgMinutesPerActiveDay ? fmtMinutes(preview.summary.avgMinutesPerActiveDay) : "—", s: "per active day, on average" },
                 ].map((c) => (
                   <div key={c.l} className="rounded-2xl border border-line bg-surface-2 p-4">
@@ -279,7 +331,7 @@ export default function SetupWizard({ config }: { config: ConfigJson }) {
                   <li>· {draft.subjects.length} subjects — {draft.subjects.map((s) => s.name).join(", ")}</li>
                   <li>· Teachers: {draft.subjects.flatMap((s) => s.teachers).length ? draft.subjects.flatMap((s) => s.teachers).join(", ") : "not added yet"}</li>
                   <li>· Lectures at {draft.profile.speed}× speed, {draft.profile.style} style, {draft.profile.revisionEnabled ? "weekly revision on" : "no revision day"}</li>
-                  <li>· Daily target {fmtMinutes(draft.profile.dailyTargetMinutes)}, NEET on {fmtDate(draft.profile.examDate)}</li>
+                  <li>· Syllabus target {draft.profile.syllabusDeadline ? fmtDate(draft.profile.syllabusDeadline) : "not set"} — daily study {fmtMinutes(draft.profile.dailyTargetMinutes)}, NEET on {fmtDate(draft.profile.examDate)}</li>
                 </ul>
               </div>
               <div className="rounded-2xl bg-ink text-bg dark:bg-surface-2 dark:text-ink p-5 flex items-center gap-4">
@@ -301,7 +353,19 @@ export default function SetupWizard({ config }: { config: ConfigJson }) {
             step {step + 1} / {STEPS.length}
           </div>
           {step < STEPS.length - 1 ? (
-            <button className="btn btn-primary" onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext}>
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                if (!canNext) return;
+                // first-time setup: design the routine + daily hours from the deadline once chapters are final
+                if (step === 2 && config.isEmpty && !autoDesigned.current) {
+                  autoDesigned.current = true;
+                  setDraft((d) => designDraft(d).draft);
+                }
+                setStep((s) => s + 1);
+              }}
+              disabled={!canNext}
+            >
               Continue <ArrowRight size={15} />
             </button>
           ) : (

@@ -11,6 +11,7 @@ import {
   revisions,
   focusSessions,
   dayNotes,
+  chapterChecks,
 } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -19,6 +20,7 @@ export async function POST() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
   const uid = user.id;
+  await db.delete(chapterChecks).where(eq(chapterChecks.userId, uid));
   await db.delete(dayNotes).where(eq(dayNotes.userId, uid));
   await db.delete(focusSessions).where(eq(focusSessions.userId, uid));
   await db.delete(revisions).where(eq(revisions.userId, uid));

@@ -12,6 +12,13 @@ interface Pill {
   today: boolean;
   backlog: boolean;
 }
+type CheckKey = "dpp" | "notes" | "ncert" | "pyq";
+const CHECKS: Array<[CheckKey, string]> = [
+  ["dpp", "DPP"],
+  ["notes", "Notes"],
+  ["ncert", "NCERT"],
+  ["pyq", "PYQs"],
+];
 interface TrackerChapter {
   id: number;
   name: string;
@@ -20,6 +27,8 @@ interface TrackerChapter {
   done: number;
   archived: boolean;
   pills: Pill[];
+  teacher: string;
+  checks: Record<CheckKey, boolean>;
 }
 export interface TrackerSubject {
   id: number;
@@ -55,6 +64,22 @@ const ChapterRow = memo(
   }) {
     const d = chapterDoneCount(c, overrides);
     const sealed = d >= c.total && c.total > 0;
+    const [checks, setChecks] = useState(c.checks);
+    const flip = async (field: CheckKey) => {
+      const next = !checks[field];
+      setChecks((x) => ({ ...x, [field]: next }));
+      try {
+        const res = await fetch("/api/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chapterId: c.id, field, value: next }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error();
+      } catch {
+        setChecks((x) => ({ ...x, [field]: !next }));
+      }
+    };
     return (
       <div
         className="cv-auto anim-rise flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-2xl border border-line bg-surface px-4 py-3.5 hover:border-line-strong transition-colors"
@@ -72,6 +97,11 @@ const ChapterRow = memo(
           <div className="text-[10.5px] text-ink-3 mt-0.5 flex items-center gap-2">
             <span className="mono uppercase">class {c.cls}</span>
             {c.archived && <span className="text-[var(--warn)]">archived</span>}
+            {c.teacher && (
+              <span className="inline-flex items-center gap-1">
+                <GraduationCap size={11} /> {c.teacher}
+              </span>
+            )}
             <span className={sealed ? "text-[var(--good)] font-medium" : ""}>
               {d}/{c.total} lectures
             </span>
@@ -99,6 +129,27 @@ const ChapterRow = memo(
             );
           })}
         </div>
+        {!c.archived && (
+          <div className="w-full flex flex-wrap items-center gap-1.5">
+            <span className="mono text-[10px] uppercase tracking-wider text-ink-3 mr-1">practice</span>
+            {CHECKS.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={checks[key]}
+                onClick={() => flip(key)}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  checks[key]
+                    ? "border-[var(--good)]/40 bg-[var(--good-soft)] text-[var(--good)]"
+                    : "border-line text-ink-2 hover:border-line-strong"
+                }`}
+              >
+                {checks[key] ? "✓ " : ""}
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   },

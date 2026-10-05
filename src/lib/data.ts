@@ -9,6 +9,7 @@ import {
   revisions,
   focusSessions,
   dayNotes,
+  chapterChecks,
   type Profile,
   type Subject,
   type Chapter,
@@ -58,6 +59,8 @@ export interface ChapterConfig {
   lectures: number;
   active: boolean;
   doneLectures: number;
+  lectureMinutes: number[];
+  teacher: string;
 }
 
 export interface RoutineConfig {
@@ -108,6 +111,8 @@ export async function getConfig(userId: number): Promise<PlannerConfig> {
         lectures: c.totalLectures,
         active: c.active,
         doneLectures: doneMap.get(c.id) ?? 0,
+        lectureMinutes: c.lectureMinutes ?? [],
+        teacher: c.teacherName ?? "",
       })),
   }));
 
@@ -133,7 +138,15 @@ export interface SaveSubjectInput {
   icon: string;
   lectureLength: number;
   teachers: string[];
-  chapters: Array<{ id?: number; name: string; cls: number; lectures: number; active: boolean }>;
+  chapters: Array<{
+    id?: number;
+    name: string;
+    cls: number;
+    lectures: number;
+    active: boolean;
+    lectureMinutes?: number[];
+    teacher?: string;
+  }>;
 }
 
 export interface SaveConfigInput {
@@ -142,6 +155,8 @@ export interface SaveConfigInput {
     motto: string;
     examDate: string;
     startDate: string;
+    syllabusDeadline?: string;
+    selfStudyRatio?: number;
     dailyTargetMinutes: number;
     speed: number;
     style: string;
@@ -154,6 +169,16 @@ export interface SaveConfigInput {
   setupCompleted: boolean;
 }
 
+/** One duration per lecture (10–600 min); missing/invalid entries fall back to the subject default. */
+function cleanMinutes(list: number[] | undefined, n: number, fallback: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const m = Math.round(Number(list?.[i]));
+    out.push(m >= 10 && m <= 600 ? m : fallback);
+  }
+  return out;
+}
+
 export async function saveConfig(userId: number, input: SaveConfigInput): Promise<void> {
   // 1. Profile
   await db
@@ -164,6 +189,8 @@ export async function saveConfig(userId: number, input: SaveConfigInput): Promis
       motto: input.profile.motto,
       examDate: input.profile.examDate,
       startDate: input.profile.startDate,
+      syllabusDeadline: input.profile.syllabusDeadline ?? "",
+      selfStudyRatio: (input.profile.selfStudyRatio ?? 1).toFixed(2),
       dailyTargetMinutes: input.profile.dailyTargetMinutes,
       speed: input.profile.speed.toFixed(2),
       style: input.profile.style,
@@ -179,6 +206,8 @@ export async function saveConfig(userId: number, input: SaveConfigInput): Promis
         motto: input.profile.motto,
         examDate: input.profile.examDate,
         startDate: input.profile.startDate,
+        syllabusDeadline: input.profile.syllabusDeadline ?? "",
+        selfStudyRatio: (input.profile.selfStudyRatio ?? 1).toFixed(2),
         dailyTargetMinutes: input.profile.dailyTargetMinutes,
         speed: input.profile.speed.toFixed(2),
         style: input.profile.style,
@@ -195,6 +224,13 @@ export async function saveConfig(userId: number, input: SaveConfigInput): Promis
   const removedSubs = existingSubs.filter((s) => !incomingKeys.has(s.key));
   if (removedSubs.length) {
     const removedIds = removedSubs.map((s) => s.id);
+    const removedChapRows = await db
+      .select({ id: chapters.id })
+      .from(chapters)
+      .where(inArray(chapters.subjectId, removedIds));
+    if (removedChapRows.length) {
+      await db.delete(chapterChecks).where(inArray(chapterChecks.chapterId, removedChapRows.map((c) => c.id)));
+    }
     await db.delete(teachers).where(inArray(teachers.subjectId, removedIds));
     await db.delete(chapters).where(inArray(chapters.subjectId, removedIds));
     await db.delete(routine).where(inArray(routine.subjectId, removedIds));
@@ -266,6 +302,7 @@ export async function saveConfig(userId: number, input: SaveConfigInput): Promis
       } else {
         await db.delete(planItems).where(eq(planItems.chapterId, rc.id));
         await db.delete(revisions).where(eq(revisions.chapterId, rc.id));
+        await db.delete(chapterChecks).where(eq(chapterChecks.chapterId, rc.id));
         await db.delete(chapters).where(eq(chapters.id, rc.id));
       }
     }
@@ -275,12 +312,30 @@ export async function saveConfig(userId: number, input: SaveConfigInput): Promis
       if (c.id && existingChaps.some((e) => e.id === c.id)) {
         await db
           .update(chapters)
-          .set({ name: c.name, classLevel: c.cls, totalLectures: c.lectures, orderIndex: j, active: c.active })
+          .set({
+            name: c.name,
+            classLevel: c.cls,
+            totalLectures: c.lectures,
+            lectureMinutes: cleanMinutes(c.lectureMinutes, c.lectures, s.lectureLength),
+            teacherName: (c.teacher ?? "").trim().slice(0, 80),
+            orderIndex: j,
+            active: c.active,
+          })
           .where(eq(chapters.id, c.id));
       } else {
         await db
           .insert(chapters)
-          .values({ userId, subjectId, name: c.name, classLevel: c.cls, totalLectures: c.lectures, orderIndex: j, active: c.active });
+          .values({
+            userId,
+            subjectId,
+            name: c.name,
+            classLevel: c.cls,
+            totalLectures: c.lectures,
+            lectureMinutes: cleanMinutes(c.lectureMinutes, c.lectures, s.lectureLength),
+            teacherName: (c.teacher ?? "").trim().slice(0, 80),
+            orderIndex: j,
+            active: c.active,
+          });
       }
     }
   }
@@ -342,7 +397,7 @@ export async function regeneratePlan(userId: number): Promise<{ inserted: number
       lectureLength: s.lectureLength,
       chapters: chps
         .filter((c) => c.subjectId === s.id)
-        .map((c) => ({ id: c.id, totalLectures: c.totalLectures })),
+        .map((c) => ({ id: c.id, totalLectures: c.totalLectures, lectureMinutes: c.lectureMinutes })),
     })),
     routine: rout.map((r) => ({ dayOfWeek: r.dayOfWeek, subjectId: r.subjectId, lectures: r.lectures })),
     doneByChapter,
@@ -570,17 +625,23 @@ function localDateOf(d: Date): string {
 /* ------------------------------------------------------------------ */
 
 export async function getTodayBundle(userId: number, date: string) {
-  const [profile, items, subs, note, sessions] = await Promise.all([
+  const [profile, items, subs, note, sessions, chapterTeachers] = await Promise.all([
     getProfile(userId),
     db.select().from(planItems).where(and(eq(planItems.userId, userId), eq(planItems.date, date))).orderBy(asc(planItems.id)),
     db.select().from(subjects).where(eq(subjects.userId, userId)).orderBy(asc(subjects.orderIndex)),
     db.select().from(dayNotes).where(and(eq(dayNotes.userId, userId), eq(dayNotes.date, date))).limit(1),
     db.select().from(focusSessions).where(and(eq(focusSessions.userId, userId), eq(focusSessions.date, date))),
+    db.select({ id: chapters.id, teacherName: chapters.teacherName }).from(chapters).where(eq(chapters.userId, userId)),
   ]);
   const subjMap = new Map(subs.map((s) => [s.id, s]));
+  const teacherOf = new Map(chapterTeachers.map((c) => [c.id, c.teacherName]));
   return {
     profile,
-    items: items.map((i) => ({ ...i, subject: subjMap.get(i.subjectId) })),
+    items: items.map((i) => ({
+      ...i,
+      subject: subjMap.get(i.subjectId),
+      teacherName: i.chapterId != null ? teacherOf.get(i.chapterId) ?? "" : "",
+    })),
     subjects: subs,
     note: note[0]?.text ?? "",
     focusMinutes: sessions.reduce((a, s) => a + s.minutes, 0),
@@ -635,7 +696,9 @@ export async function getTrackerData(userId: number) {
     if (i.chapterId == null || i.kind !== "lecture") continue;
     (itemsByChapter.get(i.chapterId) ?? itemsByChapter.set(i.chapterId, []).get(i.chapterId)!).push(i);
   }
-  return { stats, itemsByChapter, today };
+  const checkRows = await db.select().from(chapterChecks).where(eq(chapterChecks.userId, userId));
+  const checksByChapter = new Map(checkRows.map((r) => [r.chapterId, r]));
+  return { stats, itemsByChapter, today, checksByChapter };
 }
 
 export function humanMinutes(min: number): string {

@@ -8,7 +8,8 @@ import { addDays, dayOfWeek, todayStr } from "./utils";
 export interface EngineSubject {
   id: number;
   lectureLength: number;
-  chapters: Array<{ id: number; totalLectures: number }>; // active only, in order
+  /** lectureMinutes[i] = length of lecture i+1 in minutes (falls back to lectureLength) */
+  chapters: Array<{ id: number; totalLectures: number; lectureMinutes?: number[] }>; // active only, in order
 }
 
 export interface EngineRoutineEntry {
@@ -56,17 +57,17 @@ export function generatePlan(opts: EngineOptions): GeneratedItem[] {
   const maxDays = Math.min(opts.maxDays ?? 500, 730);
 
   // Remaining lecture queue per subject
-  const queues = new Map<number, Array<{ chapterId: number; lectureIndex: number }>>();
+  const queues = new Map<number, Array<{ chapterId: number; lectureIndex: number; base?: number }>>();
   // Chapters pending revision (fully scheduled but never revision-ticked)
   const revisionQueue = new Map<number, number[]>();
   const scheduleMarksRevision = new Map<number, Set<number>>();
 
   for (const s of opts.subjects) {
-    const q: Array<{ chapterId: number; lectureIndex: number }> = [];
+    const q: Array<{ chapterId: number; lectureIndex: number; base?: number }> = [];
     for (const ch of s.chapters) {
       const done = opts.doneByChapter[ch.id] ?? 0;
       for (let i = done + 1; i <= ch.totalLectures; i++) {
-        q.push({ chapterId: ch.id, lectureIndex: i });
+        q.push({ chapterId: ch.id, lectureIndex: i, base: ch.lectureMinutes?.[i - 1] });
       }
       const scheduledBefore = done;
       if (
@@ -120,9 +121,9 @@ export function generatePlan(opts: EngineOptions): GeneratedItem[] {
       const subj = opts.subjects.find((s) => s.id === r.subjectId);
       if (!queue || !subj) continue;
       let count = styleBoost(opts.style, dow, r.lectures);
-      const minutesPer = Math.max(15, Math.round(subj.lectureLength / opts.speed));
       while (count-- > 0 && queue.length) {
         const next = queue.shift()!;
+        const minutesPer = Math.max(15, Math.round((next.base && next.base > 0 ? next.base : subj.lectureLength) / opts.speed));
         remaining--;
         items.push({
           date,

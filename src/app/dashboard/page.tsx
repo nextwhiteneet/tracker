@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getProfile, getStats, getTodayBundle } from "@/lib/data";
 import { quoteOfTheDay } from "@/lib/quotes";
-import { greeting, todayStr, fmtDay, fmtDate, fmtMinutes } from "@/lib/utils";
+import { todayStr, fmtDay, fmtDate, fmtMinutes } from "@/lib/utils";
+import { Greeting } from "@/components/greeting";
 import { Ring, WeekBars, ProgressBar, SubjectGlyph } from "@/components/ui";
 import { Heatmap } from "@/components/heatmap";
 import { CountUp } from "@/components/reveal";
@@ -31,6 +32,7 @@ export default async function TodayPage() {
     subjectName: i.subject?.name ?? "—",
     subjectColor: i.subject?.color ?? "var(--accent)",
     subjectIcon: i.subject?.icon ?? "book-open",
+    teacherName: i.teacherName,
   }));
 
   const plannedToday = items.reduce((a, i) => a + i.minutes, 0);
@@ -42,7 +44,7 @@ export default async function TodayPage() {
         <div>
           <div className="eyebrow mb-2">{fmtDay(today)}</div>
           <h1 className="font-display text-[2rem] md:text-[2.6rem] leading-[1.06] tracking-tight">
-            {greeting()},{" "}
+            <Greeting />,{" "}
             <span className="serif-i grad-text">{profile.name.split(" ")[0] || "future doctor"}</span>
           </h1>
           <p className="mt-3 text-[14px] text-ink-2 max-w-lg font-display serif-i text-[15px]">
